@@ -1,0 +1,82 @@
+{
+  "name": "HITL Approval Layer - Edit-Before-Execute",
+  "nodes": [
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.HITL_API_URL + '/v1/approvals'}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{'Bearer ' + $env.HITL_API_KEY}}"
+            },
+            {
+              "name": "Idempotency-Key",
+              "value": "={{'n8n_' + $execution.id}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ action_type: 'stripe.refund', title: 'Issue Customer Refund', summary: 'Proposed by AI support workflow', callback_url: $execution.resumeUrl, timeout_seconds: 1800, payload: { order_id: 'ord_98421', refund_amount_usd: 240, reply_message: 'We have issued a refund for your order.' }, editable_schema: { refund_amount_usd: { type: 'number', label: 'Refund Amount (USD)', editable: true, min: 0, max: 500 }, reply_message: { type: 'textarea', label: 'Customer Reply', editable: true, maxLength: 2000 }, order_id: { type: 'string', label: 'Order ID', editable: false } } }) }}"
+      },
+      "id": "request-approval",
+      "name": "Request HITL Approval",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$json.status}}",
+              "operation": "equals",
+              "value2": "pending"
+            }
+          ]
+        }
+      },
+      "id": "if-pending",
+      "name": "IF status === pending",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "resume": "webhook",
+        "options": {}
+      },
+      "id": "wait-for-decision",
+      "name": "Wait for Human Decision",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [720, 220]
+    },
+    {
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\nconst headers = $input.first().json.headers || {};\nconst body = $input.first().json.body;\nconst rawBody = typeof body === 'string' ? body : JSON.stringify(body);\nconst timestamp = Number(headers['x-hitl-timestamp']);\nconst sig = String(headers['x-signature-256'] || '');\nif (!timestamp || Math.abs(Math.floor(Date.now() / 1000) - timestamp) > 300) {\n  throw new Error('Expired or missing X-HITL-Timestamp');\n}\nconst secrets = [$env.HITL_WEBHOOK_SECRET, $env.HITL_WEBHOOK_SECRET_PREV].filter(Boolean);\nconst valid = secrets.some((secret) => {\n  const expected = 'sha256=' + crypto.createHmac('sha256', secret).update(`${timestamp}.${rawBody}`).digest('hex');\n  const a = Buffer.from(sig);\n  const b = Buffer.from(expected);\n  return a.length === b.length && crypto.timingSafeEqual(a, b);\n});\nif (!valid) throw new Error('Invalid HMAC signature');\nreturn [{ json: typeof body === 'string' ? JSON.parse(body) : body }];"
+      },
+      "id": "verify-hmac",
+      "name": "Verify HMAC Signature",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 220]
+    }
+  ],
+  "connections": {
+    "Request HITL Approval": {
+      "main": [[{ "node": "IF status === pending", "type": "main", "index": 0 }]]
+    },
+    "IF status === pending": {
+      "main": [[{ "node": "Wait for Human Decision", "type": "main", "index": 0 }], []]
+    },
+    "Wait for Human Decision": {
+      "main": [[{ "node": "Verify HMAC Signature", "type": "main", "index": 0 }]]
+    }
+  }
+}
