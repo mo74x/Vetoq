@@ -1,6 +1,6 @@
 import { Global, Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
-import IORedis from 'ioredis';
+import { Redis } from 'ioredis';
 
 export const REDIS_TOKEN = Symbol('HITL_REDIS');
 
@@ -30,7 +30,7 @@ export const QUEUE_RECONCILIATION = 'hitl-reconciliation';
   providers: [
     {
       provide: REDIS_TOKEN,
-      useFactory: () => new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6379'),
+      useFactory: () => new Redis(process.env.REDIS_URL ?? 'redis://localhost:6379'),
     },
   ],
   exports: [BullModule, REDIS_TOKEN],

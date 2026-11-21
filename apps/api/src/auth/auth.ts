@@ -15,9 +15,6 @@ export function createBetterAuth(db: HitlDb) {
     secret: process.env.BETTER_AUTH_SECRET ?? 'change_me_to_a_long_random_secret_at_least_32_chars',
     baseURL: process.env.BETTER_AUTH_URL ?? webUrl,
     trustedOrigins: [webUrl],
-    advanced: {
-      trustedProxyHeaders: true,
-    },
     emailAndPassword: {
       enabled: true,
     },

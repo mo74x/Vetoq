@@ -165,13 +165,11 @@ export class ReviewService {
       let requiredApprovals = Number(lockedRow.required_approvals);
       let payloadVersion = Number(lockedRow.payload_version);
       let editCount = Number(lockedRow.edit_count);
-      let effectivePolicySnapshot = lockedRow.effective_policy_snapshot as Record<
-        string,
-        unknown
-      > | null;
+      let effectivePolicySnapshot: Record<string, unknown> | null =
+        (lockedRow.effective_policy_snapshot as Record<string, unknown> | null) ?? null;
 
       let payloadChanged = false;
-      let nextPayload = currentPayload;
+      let nextPayload: Record<string, unknown> = currentPayload;
       let diffPayload: unknown = null;
 
       if (body.edited_fields && Object.keys(body.edited_fields).length > 0) {
