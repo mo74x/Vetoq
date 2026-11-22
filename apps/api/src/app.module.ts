@@ -17,6 +17,8 @@ import { DashboardApprovalsController } from './dashboard/approvals.controller.j
 import { AuditController } from './dashboard/audit.controller.js';
 import { HealthController } from './health/health.controller.js';
 import { BillingWebhookController } from './billing/billing-webhook.controller.js';
+import { SlackController } from './slack/slack.controller.js';
+import { SlackService } from './slack/slack.service.js';
 import { TimeoutProcessor } from './workers/timeout.processor.js';
 import { WebhookProcessor } from './workers/webhook.processor.js';
 import { EmailProcessor } from './workers/email.processor.js';
@@ -27,6 +29,7 @@ import { ReconciliationProcessor } from './workers/reconciliation.processor.js';
   controllers: [
     HealthController,
     BillingWebhookController,
+    SlackController,
     ApprovalsController,
     ReviewController,
     ProjectsController,
@@ -38,6 +41,7 @@ import { ReconciliationProcessor } from './workers/reconciliation.processor.js';
     CryptoService,
     ApiKeyGuard,
     RateLimitGuard,
+    SlackService,
     {
       provide: BETTER_AUTH_TOKEN,
       inject: [DB_TOKEN],

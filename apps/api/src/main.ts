@@ -55,9 +55,20 @@ async function bootstrap() {
     },
   });
 
+  const urlencodedParser = express.urlencoded({
+    extended: true,
+    limit: MAX_APPROVAL_BODY_BYTES,
+    verify: (req: Request & { rawBody?: Buffer }, _res, buf) => {
+      req.rawBody = buf;
+    },
+  });
+
   expressApp.use((req: Request, res: Response, next: NextFunction) => {
     if (req.path.startsWith('/api/auth')) {
       return next();
+    }
+    if (req.headers['content-type']?.includes('application/x-www-form-urlencoded')) {
+      return urlencodedParser(req, res, next);
     }
     return jsonParser(req, res, next);
   });

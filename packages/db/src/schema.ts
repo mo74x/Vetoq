@@ -116,6 +116,9 @@ export const projects = pgTable('projects', {
     .default(sql`'{}'::text[]`),
   webhookSecretEnc: text('webhook_secret_enc').notNull(),
   webhookSecretPrevEnc: text('webhook_secret_prev_enc'),
+  slackBotTokenEnc: text('slack_bot_token_enc'),
+  slackSigningSecretEnc: text('slack_signing_secret_enc'),
+  defaultSlackChannel: text('default_slack_channel'),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
