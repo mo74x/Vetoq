@@ -21,9 +21,24 @@ interface PolicyRow {
   approverEmails: string[];
 }
 
+interface CircuitBreakerRow {
+  id: string;
+  actionType: string;
+  maxRequestsPerHour: number | null;
+  maxCumulativeAmountPerDay: number | null;
+  amountField: string | null;
+  isTripped: boolean;
+  trippedReason: string | null;
+}
+
 export default function PoliciesPage() {
   const [projectId, setProjectId] = useState('');
   const [policies, setPolicies] = useState<PolicyRow[]>([]);
+  const [breakers, setBreakers] = useState<CircuitBreakerRow[]>([]);
+  const [cbActionType, setCbActionType] = useState('stripe.refund');
+  const [cbMaxReq, setCbMaxReq] = useState('20');
+  const [cbMaxAmt, setCbMaxAmt] = useState('1000');
+  const [cbAmtField, setCbAmtField] = useState('refund_amount_usd');
   const [actionType, setActionType] = useState('stripe.refund');
   const [priority, setPriority] = useState(50);
   const [decisionMode, setDecisionMode] = useState<'auto_approve' | 'require_approval' | 'auto_reject'>('require_approval');
@@ -39,12 +54,51 @@ export default function PoliciesPage() {
     if (!projectId) return;
     setError(null);
     try {
-      const data = await apiFetch<PolicyRow[]>(
-        `/dashboard/policies?projectId=${encodeURIComponent(projectId)}`,
-      );
+      const [data, cbData] = await Promise.all([
+        apiFetch<PolicyRow[]>(`/dashboard/policies?projectId=${encodeURIComponent(projectId)}`),
+        apiFetch<CircuitBreakerRow[]>(
+          `/dashboard/policies/circuit-breakers?projectId=${encodeURIComponent(projectId)}`,
+        ),
+      ]);
       setPolicies(data);
+      setBreakers(cbData);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load policies');
+    }
+  }
+
+  async function saveBreaker(e: React.FormEvent) {
+    e.preventDefault();
+    if (!projectId) return;
+    setError(null);
+    try {
+      await apiFetch('/dashboard/policies/circuit-breakers', {
+        method: 'POST',
+        body: JSON.stringify({
+          projectId,
+          action_type: cbActionType,
+          max_requests_per_hour: cbMaxReq ? Number(cbMaxReq) : null,
+          max_cumulative_amount_per_day: cbMaxAmt ? Number(cbMaxAmt) : null,
+          amount_field: cbAmtField.trim() || null,
+        }),
+      });
+      await loadPolicies();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save circuit breaker');
+    }
+  }
+
+  async function resetBreaker(id: string) {
+    if (!projectId) return;
+    setError(null);
+    try {
+      await apiFetch(
+        `/dashboard/policies/circuit-breakers/${id}/reset?projectId=${encodeURIComponent(projectId)}`,
+        { method: 'POST' },
+      );
+      await loadPolicies();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to reset circuit breaker');
     }
   }
 
@@ -287,6 +341,88 @@ export default function PoliciesPage() {
           <p className="px-4 py-6 text-sm text-slate-500">No policies loaded.</p>
         )}
       </div>
+
+      {projectId && (
+        <section className="space-y-4 rounded-lg border border-slate-200 bg-white p-6">
+          <h2 className="text-base font-semibold text-slate-900">
+            Velocity &amp; Spend Circuit Breakers
+          </h2>
+          <form onSubmit={saveBreaker} className="grid gap-3 sm:grid-cols-5">
+            <input
+              type="text"
+              required
+              value={cbActionType}
+              onChange={(e) => setCbActionType(e.target.value)}
+              placeholder="Action Type"
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+            />
+            <input
+              type="number"
+              value={cbMaxReq}
+              onChange={(e) => setCbMaxReq(e.target.value)}
+              placeholder="Max req/hr"
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+            />
+            <input
+              type="number"
+              value={cbMaxAmt}
+              onChange={(e) => setCbMaxAmt(e.target.value)}
+              placeholder="Max $/day"
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+            />
+            <input
+              type="text"
+              value={cbAmtField}
+              onChange={(e) => setCbAmtField(e.target.value)}
+              placeholder="Amount field"
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+            />
+            <button
+              type="submit"
+              className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white"
+            >
+              Save Breaker
+            </button>
+          </form>
+
+          <div className="divide-y divide-slate-200 rounded-md border border-slate-200">
+            {breakers.map((b) => (
+              <div key={b.id} className="flex items-center justify-between px-4 py-3 text-sm">
+                <div>
+                  <p className="font-medium text-slate-900">
+                    {b.actionType}{' '}
+                    {b.isTripped ? (
+                      <span className="ml-2 rounded bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700">
+                        TRIPPED: {b.trippedReason}
+                      </span>
+                    ) : (
+                      <span className="ml-2 rounded bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                        ARMED
+                      </span>
+                    )}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    Max/hr: {b.maxRequestsPerHour ?? '∞'} · Max/day:{' '}
+                    {b.maxCumulativeAmountPerDay ?? '∞'} ({b.amountField ?? 'n/a'})
+                  </p>
+                </div>
+                {b.isTripped && (
+                  <button
+                    type="button"
+                    onClick={() => resetBreaker(b.id)}
+                    className="rounded border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    Reset Breaker
+                  </button>
+                )}
+              </div>
+            ))}
+            {breakers.length === 0 && (
+              <p className="px-4 py-4 text-xs text-slate-500">No circuit breakers configured.</p>
+            )}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

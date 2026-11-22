@@ -5,14 +5,22 @@ import {
   Header,
   Inject,
   NotFoundException,
+  Param,
   Query,
   Req,
   Res,
   UseGuards,
 } from '@nestjs/common';
 import type { Response } from 'express';
-import { and, desc, eq, isNull } from 'drizzle-orm';
-import { auditLogs, projects, type HitlDb } from '@hitl/db';
+import { and, asc, desc, eq, isNull } from 'drizzle-orm';
+import {
+  approvalRequests,
+  approvalVotes,
+  auditLogs,
+  projects,
+  webhookDeliveries,
+  type HitlDb,
+} from '@hitl/db';
 import { AuthGuard, type AuthenticatedSession } from '../auth/auth.guard.js';
 import { DB_TOKEN } from '../db/db.module.js';
 
@@ -67,5 +75,53 @@ export class AuditController {
     );
     res.setHeader('Content-Disposition', `attachment; filename="audit-${projectId}.csv"`);
     return res.send(header + lines.join('\n'));
+  }
+
+  @Get('evidence/:approvalRequestId')
+  async exportEvidencePack(
+    @Req() req: { authSession: AuthenticatedSession },
+    @Param('approvalRequestId') approvalRequestId: string,
+  ) {
+    const orgId = req.authSession.activeOrganizationId;
+    if (!orgId) throw new BadRequestException('No active organization selected');
+
+    const [row] = await this.db
+      .select({ request: approvalRequests, projectName: projects.name })
+      .from(approvalRequests)
+      .innerJoin(projects, eq(approvalRequests.projectId, projects.id))
+      .where(
+        and(eq(approvalRequests.id, approvalRequestId), eq(projects.orgId, orgId)),
+      )
+      .limit(1);
+
+    if (!row) throw new NotFoundException('Approval request not found');
+
+    const [votes, timeline, deliveries] = await Promise.all([
+      this.db
+        .select()
+        .from(approvalVotes)
+        .where(eq(approvalVotes.approvalRequestId, approvalRequestId))
+        .orderBy(asc(approvalVotes.createdAt)),
+      this.db
+        .select()
+        .from(auditLogs)
+        .where(eq(auditLogs.approvalRequestId, approvalRequestId))
+        .orderBy(asc(auditLogs.createdAt)),
+      this.db
+        .select()
+        .from(webhookDeliveries)
+        .where(eq(webhookDeliveries.approvalRequestId, approvalRequestId))
+        .orderBy(asc(webhookDeliveries.createdAt)),
+    ]);
+
+    return {
+      schema_version: 'vetoq.evidence.v1',
+      generated_at: new Date().toISOString(),
+      project_name: row.projectName,
+      request: row.request,
+      votes,
+      audit_timeline: timeline,
+      webhook_deliveries: deliveries,
+    };
   }
 }

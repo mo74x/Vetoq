@@ -290,3 +290,24 @@ export const billingEvents = pgTable('billing_events', {
   eventType: text('event_type').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+export const circuitBreakers = pgTable(
+  'circuit_breakers',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    actionType: text('action_type').notNull(),
+    maxRequestsPerHour: integer('max_requests_per_hour'),
+    maxCumulativeAmountPerDay: integer('max_cumulative_amount_per_day'),
+    amountField: text('amount_field'),
+    isTripped: boolean('is_tripped').notNull().default(false),
+    trippedAt: timestamp('tripped_at', { withTimezone: true }),
+    trippedReason: text('tripped_reason'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('uq_circuit_breakers_project_action').on(table.projectId, table.actionType),
+  ],
+);

@@ -11,6 +11,7 @@ import {
   approvalTokens,
   approvalVotes,
   auditLogs,
+  circuitBreakers,
   organizations,
   policies,
   projects,
@@ -553,6 +554,40 @@ describe('HITL Approval Layer — Phase 1 E2E', () => {
       .where(eq(approvalRequests.id, created.body.id));
     expect(updated.status).toBe('edited_and_approved');
     expect(updated.finalPayload).toEqual({ order_id: 'ord_slack', refund_amount_usd: 125 });
+  });
+
+  it('Tier 2: trips Velocity Circuit Breaker and freezes auto_approve into pending', async () => {
+    await db.insert(circuitBreakers).values({
+      projectId,
+      actionType: 'stripe.refund',
+      maxRequestsPerHour: 1,
+    });
+
+    // First small refund passes (reqCount = 1 <= 1) -> auto_approved (200)
+    await request(app.getHttpServer())
+      .post('/v1/approvals')
+      .set('Authorization', `Bearer ${rawApiKey}`)
+      .send({
+        action_type: 'stripe.refund',
+        title: 'CB pass',
+        callback_url: 'https://example.com/hook',
+        payload: { order_id: 'ord_cb1', refund_amount_usd: 10 },
+      })
+      .expect(200);
+
+    // Second small refund trips breaker (reqCount = 2 > 1) -> forced pending (202)
+    const trippedRes = await request(app.getHttpServer())
+      .post('/v1/approvals')
+      .set('Authorization', `Bearer ${rawApiKey}`)
+      .send({
+        action_type: 'stripe.refund',
+        title: 'CB tripped',
+        callback_url: 'https://example.com/hook',
+        payload: { order_id: 'ord_cb2', refund_amount_usd: 10 },
+      })
+      .expect(202);
+
+    expect(trippedRes.body.status).toBe('pending');
   });
 });
 

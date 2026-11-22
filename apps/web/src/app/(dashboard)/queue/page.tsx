@@ -109,18 +109,32 @@ export default function QueuePage() {
       </div>
 
       {selected && (
-        <div className="grid gap-4 rounded-lg border border-slate-200 bg-white p-6 md:grid-cols-2">
-          <div>
-            <h3 className="text-xs font-semibold uppercase text-slate-500">Original Payload</h3>
-            <pre className="mt-2 overflow-x-auto rounded bg-slate-50 p-3 text-xs">
-              {JSON.stringify(selected.originalPayload, null, 2)}
-            </pre>
+        <div className="space-y-4 rounded-lg border border-slate-200 bg-white p-6">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-slate-900">
+              Inspecting {selected.title}
+            </h3>
+            <a
+              href={`/api/v1/dashboard/audit/evidence/${encodeURIComponent(selected.id)}`}
+              download={`evidence-${selected.id}.json`}
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Download Evidence Pack (JSON)
+            </a>
           </div>
-          <div>
-            <h3 className="text-xs font-semibold uppercase text-slate-500">Final Payload</h3>
-            <pre className="mt-2 overflow-x-auto rounded bg-slate-50 p-3 text-xs">
-              {JSON.stringify(selected.finalPayload ?? selected.originalPayload, null, 2)}
-            </pre>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <h4 className="text-xs font-semibold uppercase text-slate-500">Original Payload</h4>
+              <pre className="mt-2 overflow-x-auto rounded bg-slate-50 p-3 text-xs">
+                {JSON.stringify(selected.originalPayload, null, 2)}
+              </pre>
+            </div>
+            <div>
+              <h4 className="text-xs font-semibold uppercase text-slate-500">Final Payload</h4>
+              <pre className="mt-2 overflow-x-auto rounded bg-slate-50 p-3 text-xs">
+                {JSON.stringify(selected.finalPayload ?? selected.originalPayload, null, 2)}
+              </pre>
+            </div>
           </div>
         </div>
       )}

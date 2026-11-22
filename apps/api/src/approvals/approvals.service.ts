@@ -8,11 +8,13 @@ import {
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import type { Queue } from 'bullmq';
+import type { Redis } from 'ioredis';
 import { and, desc, eq, gte, inArray, sql } from 'drizzle-orm';
 import {
   approvalRequests,
   approvalTokens,
   auditLogs,
+  circuitBreakers,
   members,
   organizations,
   policies,
@@ -22,6 +24,7 @@ import {
 } from '@hitl/db';
 import {
   evaluatePolicies,
+  resolveDotPath,
   validateCallbackUrlSyntax,
   type CreateApprovalRequest,
   type PolicyRule,
@@ -30,12 +33,13 @@ import { DB_TOKEN } from '../db/db.module.js';
 import { CryptoService } from '../common/crypto.service.js';
 import { getPlanLimits } from '../common/plan-limits.js';
 import { SlackService } from '../slack/slack.service.js';
-import { QUEUE_EMAILS, QUEUE_TIMEOUTS } from '../workers/queues.module.js';
+import { QUEUE_EMAILS, QUEUE_TIMEOUTS, REDIS_TOKEN } from '../workers/queues.module.js';
 
 @Injectable()
 export class ApprovalsService {
   constructor(
     @Inject(DB_TOKEN) private readonly db: HitlDb,
+    @Inject(REDIS_TOKEN) private readonly redis: Redis,
     private readonly crypto: CryptoService,
     private readonly slackService: SlackService,
     @InjectQueue(QUEUE_TIMEOUTS) private readonly timeoutQueue: Queue,
@@ -174,6 +178,68 @@ export class ApprovalsService {
       body.timeout_seconds ?? 3600,
     );
 
+    // Check velocity & spend circuit breakers
+    let circuitBreakerTrippedReason: string | null = null;
+    const breakers = await this.db
+      .select()
+      .from(circuitBreakers)
+      .where(
+        and(
+          eq(circuitBreakers.projectId, projectId),
+          inArray(circuitBreakers.actionType, [body.action_type, '*']),
+        ),
+      );
+
+    for (const breaker of breakers) {
+      if (breaker.isTripped) {
+        circuitBreakerTrippedReason = breaker.trippedReason ?? 'Circuit breaker already tripped';
+        break;
+      }
+
+      if (breaker.maxRequestsPerHour !== null) {
+        const reqKey = `cb:req:${projectId}:${breaker.actionType}`;
+        const reqCount = await this.redis.incr(reqKey);
+        if (reqCount === 1) await this.redis.expire(reqKey, 3600);
+        if (reqCount > breaker.maxRequestsPerHour) {
+          circuitBreakerTrippedReason = `Hourly request limit (${breaker.maxRequestsPerHour}) exceeded`;
+        }
+      }
+
+      if (
+        !circuitBreakerTrippedReason &&
+        breaker.maxCumulativeAmountPerDay !== null &&
+        breaker.amountField
+      ) {
+        const amtCheck = resolveDotPath(body.payload, breaker.amountField);
+        if (amtCheck.found && typeof amtCheck.value === 'number' && Number.isFinite(amtCheck.value)) {
+          const amtKey = `cb:amt:${projectId}:${breaker.actionType}`;
+          const newTotal = Number(await this.redis.incrbyfloat(amtKey, amtCheck.value));
+          const ttl = await this.redis.ttl(amtKey);
+          if (ttl < 0) await this.redis.expire(amtKey, 86400);
+          if (newTotal > breaker.maxCumulativeAmountPerDay) {
+            circuitBreakerTrippedReason = `Daily spend limit (${breaker.maxCumulativeAmountPerDay}) exceeded`;
+          }
+        }
+      }
+
+      if (circuitBreakerTrippedReason) {
+        await this.db
+          .update(circuitBreakers)
+          .set({
+            isTripped: true,
+            trippedAt: new Date(),
+            trippedReason: circuitBreakerTrippedReason,
+          })
+          .where(eq(circuitBreakers.id, breaker.id));
+        break;
+      }
+    }
+
+    if (circuitBreakerTrippedReason && evaluation.decision_mode === 'auto_approve') {
+      evaluation.decision_mode = 'require_approval';
+      evaluation.required_approvals = Math.max(1, evaluation.required_approvals);
+    }
+
     const effectiveTimeout = body.timeout_seconds ?? evaluation.timeout_seconds;
     const expiresAt = new Date(Date.now() + effectiveTimeout * 1000);
 
@@ -302,6 +368,7 @@ export class ApprovalsService {
             matched_policy_id: evaluation.matched_policy_id,
             fallback_reason: evaluation.fallback_reason ?? null,
             required_approvals: evaluation.required_approvals,
+            circuit_breaker_tripped: circuitBreakerTrippedReason,
           },
         },
       ]);

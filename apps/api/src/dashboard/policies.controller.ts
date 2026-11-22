@@ -13,15 +13,20 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { and, asc, eq, isNull } from 'drizzle-orm';
-import { policies, projects, type HitlDb } from '@hitl/db';
+import type { Redis } from 'ioredis';
+import { circuitBreakers, policies, projects, type HitlDb } from '@hitl/db';
 import { policyConditionSchema } from '@hitl/shared';
 import { AuthGuard, type AuthenticatedSession } from '../auth/auth.guard.js';
 import { DB_TOKEN } from '../db/db.module.js';
+import { REDIS_TOKEN } from '../workers/queues.module.js';
 
 @Controller('v1/dashboard/policies')
 @UseGuards(AuthGuard)
 export class PoliciesController {
-  constructor(@Inject(DB_TOKEN) private readonly db: HitlDb) {}
+  constructor(
+    @Inject(DB_TOKEN) private readonly db: HitlDb,
+    @Inject(REDIS_TOKEN) private readonly redis: Redis,
+  ) {}
 
   private async verifyProjectAccess(orgId: string | null, projectId: string) {
     if (!orgId) throw new BadRequestException('No active organization selected');
@@ -96,5 +101,88 @@ export class PoliciesController {
       .delete(policies)
       .where(and(eq(policies.id, id), eq(policies.projectId, projectId)));
     return { deleted: true };
+  }
+
+  @Get('circuit-breakers')
+  async listCircuitBreakers(
+    @Req() req: { authSession: AuthenticatedSession },
+    @Query('projectId') projectId: string,
+  ) {
+    await this.verifyProjectAccess(req.authSession.activeOrganizationId, projectId);
+    return this.db
+      .select()
+      .from(circuitBreakers)
+      .where(eq(circuitBreakers.projectId, projectId));
+  }
+
+  @Post('circuit-breakers')
+  async upsertCircuitBreaker(
+    @Req() req: { authSession: AuthenticatedSession },
+    @Body()
+    body: {
+      projectId: string;
+      action_type: string;
+      max_requests_per_hour?: number | null;
+      max_cumulative_amount_per_day?: number | null;
+      amount_field?: string | null;
+    },
+  ) {
+    await this.verifyProjectAccess(req.authSession.activeOrganizationId, body.projectId);
+    const [existing] = await this.db
+      .select()
+      .from(circuitBreakers)
+      .where(
+        and(
+          eq(circuitBreakers.projectId, body.projectId),
+          eq(circuitBreakers.actionType, body.action_type),
+        ),
+      )
+      .limit(1);
+
+    if (existing) {
+      const [updated] = await this.db
+        .update(circuitBreakers)
+        .set({
+          maxRequestsPerHour: body.max_requests_per_hour ?? null,
+          maxCumulativeAmountPerDay: body.max_cumulative_amount_per_day ?? null,
+          amountField: body.amount_field ?? null,
+        })
+        .where(eq(circuitBreakers.id, existing.id))
+        .returning();
+      return updated;
+    }
+
+    const [created] = await this.db
+      .insert(circuitBreakers)
+      .values({
+        projectId: body.projectId,
+        actionType: body.action_type,
+        maxRequestsPerHour: body.max_requests_per_hour ?? null,
+        maxCumulativeAmountPerDay: body.max_cumulative_amount_per_day ?? null,
+        amountField: body.amount_field ?? null,
+      })
+      .returning();
+    return created;
+  }
+
+  @Post('circuit-breakers/:id/reset')
+  async resetCircuitBreaker(
+    @Req() req: { authSession: AuthenticatedSession },
+    @Param('id') id: string,
+    @Query('projectId') projectId: string,
+  ) {
+    await this.verifyProjectAccess(req.authSession.activeOrganizationId, projectId);
+    const [breaker] = await this.db
+      .update(circuitBreakers)
+      .set({ isTripped: false, trippedAt: null, trippedReason: null })
+      .where(and(eq(circuitBreakers.id, id), eq(circuitBreakers.projectId, projectId)))
+      .returning();
+
+    if (!breaker) throw new NotFoundException('Circuit breaker not found');
+    await this.redis.del(
+      `cb:req:${projectId}:${breaker.actionType}`,
+      `cb:amt:${projectId}:${breaker.actionType}`,
+    );
+    return breaker;
   }
 }
