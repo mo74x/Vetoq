@@ -3,16 +3,27 @@
 import { useState } from 'react';
 import { apiFetch } from '@/lib/api-client';
 
+interface WebhookRow {
+  id: string;
+  approvalRequestId: string;
+  callbackUrl: string;
+  attemptNumber: number;
+  httpStatus: number | null;
+  responseBody: string | null;
+  status: string;
+  createdAt: string;
+}
+
 export default function WebhooksPage() {
   const [projectId, setProjectId] = useState('');
-  const [deliveries, setDeliveries] = useState<Array<Record<string, unknown>>>([]);
+  const [deliveries, setDeliveries] = useState<WebhookRow[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   async function load(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     try {
-      const data = await apiFetch<Array<Record<string, unknown>>>(
+      const data = await apiFetch<WebhookRow[]>(
         `/dashboard/approvals/webhooks?projectId=${encodeURIComponent(projectId)}`,
       );
       setDeliveries(data);
@@ -41,9 +52,42 @@ export default function WebhooksPage() {
         </button>
       </form>
       {error && <p className="text-sm text-red-600">{error}</p>}
-      <pre className="overflow-x-auto rounded-lg border border-slate-200 bg-white p-4 text-xs">
-        {JSON.stringify(deliveries, null, 2)}
-      </pre>
+
+      <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+        <table className="w-full text-left text-sm">
+          <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase text-slate-500">
+            <tr>
+              <th className="px-4 py-3">Status</th>
+              <th className="px-4 py-3">HTTP</th>
+              <th className="px-4 py-3">Attempt</th>
+              <th className="px-4 py-3">Callback URL</th>
+              <th className="px-4 py-3">Response</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-200">
+            {deliveries.map((d) => (
+              <tr key={d.id}>
+                <td className="px-4 py-3 font-mono text-xs">{d.status}</td>
+                <td className="px-4 py-3 font-mono text-xs">{d.httpStatus ?? '-'}</td>
+                <td className="px-4 py-3 text-xs">{d.attemptNumber}</td>
+                <td className="max-w-xs truncate px-4 py-3 font-mono text-xs text-slate-600">
+                  {d.callbackUrl}
+                </td>
+                <td className="max-w-xs truncate px-4 py-3 font-mono text-xs text-slate-500">
+                  {d.responseBody ?? '-'}
+                </td>
+              </tr>
+            ))}
+            {deliveries.length === 0 && (
+              <tr>
+                <td colSpan={5} className="px-4 py-6 text-center text-slate-500">
+                  No webhook deliveries loaded.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

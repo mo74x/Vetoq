@@ -7,12 +7,13 @@ import {
   Inject,
   NotFoundException,
   Param,
+  Patch,
   Post,
   Req,
   UseGuards,
 } from '@nestjs/common';
 import { and, desc, eq, isNull } from 'drizzle-orm';
-import { apiKeys, projects, type HitlDb } from '@hitl/db';
+import { apiKeys, organizations, projects, type HitlDb } from '@hitl/db';
 import { AuthGuard, type AuthenticatedSession } from '../auth/auth.guard.js';
 import { DB_TOKEN } from '../db/db.module.js';
 import { CryptoService } from '../common/crypto.service.js';
@@ -75,6 +76,75 @@ export class ProjectsController {
       });
 
     return { ...created, webhook_secret: rawSecret };
+  }
+
+  @Get('branding')
+  async getBranding(@Req() req: { authSession: AuthenticatedSession }) {
+    const orgId = this.requireOrg(req.authSession);
+    const [org] = await this.db
+      .select({
+        id: organizations.id,
+        name: organizations.name,
+        slug: organizations.slug,
+        plan: organizations.plan,
+        brandingConfig: organizations.brandingConfig,
+      })
+      .from(organizations)
+      .where(eq(organizations.id, orgId))
+      .limit(1);
+    if (!org) throw new NotFoundException('Organization not found');
+    return org;
+  }
+
+  @Patch('branding')
+  async updateBranding(
+    @Req() req: { authSession: AuthenticatedSession },
+    @Body() body: { logo_url?: string; accent_color?: string },
+  ) {
+    const orgId = this.requireOrg(req.authSession);
+    const [updated] = await this.db
+      .update(organizations)
+      .set({
+        brandingConfig: {
+          logo_url: body.logo_url?.trim() || undefined,
+          accent_color: body.accent_color?.trim() || undefined,
+        },
+      })
+      .where(eq(organizations.id, orgId))
+      .returning({
+        id: organizations.id,
+        brandingConfig: organizations.brandingConfig,
+      });
+    return updated;
+  }
+
+  @Patch(':projectId')
+  async updateProject(
+    @Req() req: { authSession: AuthenticatedSession },
+    @Param('projectId') projectId: string,
+    @Body() body: { name?: string; default_approver_emails?: string[] },
+  ) {
+    const orgId = this.requireOrg(req.authSession);
+    const [project] = await this.db
+      .select({ id: projects.id })
+      .from(projects)
+      .where(and(eq(projects.id, projectId), eq(projects.orgId, orgId), isNull(projects.deletedAt)))
+      .limit(1);
+    if (!project) throw new NotFoundException('Project not found');
+
+    const [updated] = await this.db
+      .update(projects)
+      .set({
+        ...(body.name?.trim() ? { name: body.name.trim() } : {}),
+        ...(body.default_approver_emails ? { defaultApproverEmails: body.default_approver_emails } : {}),
+      })
+      .where(eq(projects.id, projectId))
+      .returning({
+        id: projects.id,
+        name: projects.name,
+        defaultApproverEmails: projects.defaultApproverEmails,
+      });
+    return updated;
   }
 
   @Post(':projectId/rotate-webhook-secret')

@@ -5,7 +5,6 @@ import { type INestApplication } from '@nestjs/common';
 import express from 'express';
 import request from 'supertest';
 import { and, eq, sql } from 'drizzle-orm';
-import type { Redis } from 'ioredis';
 import {
   apiKeys,
   approvalRequests,
@@ -26,12 +25,11 @@ import { getQueueToken } from '@nestjs/bullmq';
 import type { Queue } from 'bullmq';
 import { TimeoutProcessor } from '../src/workers/timeout.processor.js';
 import { ReconciliationProcessor } from '../src/workers/reconciliation.processor.js';
-import { QUEUE_WEBHOOKS, REDIS_TOKEN } from '../src/workers/queues.module.js';
+import { QUEUE_WEBHOOKS } from '../src/workers/queues.module.js';
 
 describe('HITL Approval Layer — Phase 1 E2E', () => {
   let app: INestApplication;
   let db: HitlDb;
-  let redis: Redis;
   let cryptoSvc: CryptoService;
   let timeoutProcessor: TimeoutProcessor;
   let reconciliationProcessor: ReconciliationProcessor;
@@ -51,7 +49,6 @@ describe('HITL Approval Layer — Phase 1 E2E', () => {
     await app.init();
 
     db = app.get<HitlDb>(DB_TOKEN);
-    redis = app.get<Redis>(REDIS_TOKEN);
     cryptoSvc = app.get(CryptoService);
     timeoutProcessor = app.get(TimeoutProcessor);
     reconciliationProcessor = app.get(ReconciliationProcessor);
