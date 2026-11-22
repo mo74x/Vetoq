@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { apiFetch } from '@/lib/api-client';
+import { ProjectSelector } from '@/components/dashboard/project-selector';
 
 interface ApprovalItem {
   id: string;
@@ -22,8 +23,9 @@ export default function QueuePage() {
   const [selected, setSelected] = useState<ApprovalItem | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  async function load(e: React.FormEvent) {
-    e.preventDefault();
+  async function load(e?: React.FormEvent) {
+    e?.preventDefault();
+    if (!projectId) return;
     setError(null);
     try {
       const data = await apiFetch<ApprovalItem[]>(
@@ -35,6 +37,10 @@ export default function QueuePage() {
     }
   }
 
+  useEffect(() => {
+    if (projectId) void load();
+  }, [projectId]);
+
   const filtered =
     statusFilter === 'all' ? items : items.filter((item) => item.status === statusFilter);
 
@@ -42,14 +48,7 @@ export default function QueuePage() {
     <div className="space-y-6">
       <h1 className="text-2xl font-semibold text-slate-900">Approval Queue</h1>
       <form onSubmit={load} className="flex flex-wrap gap-3">
-        <input
-          type="text"
-          required
-          value={projectId}
-          onChange={(e) => setProjectId(e.target.value)}
-          placeholder="Project UUID"
-          className="w-80 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
-        />
+        <ProjectSelector value={projectId} onChange={setProjectId} />
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}

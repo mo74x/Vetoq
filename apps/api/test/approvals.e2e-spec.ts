@@ -45,7 +45,23 @@ describe('HITL Approval Layer — Phase 1 E2E', () => {
     }).compile();
 
     app = moduleRef.createNestApplication({ bodyParser: false });
-    app.use(express.json({ limit: MAX_APPROVAL_BODY_BYTES }));
+    app.use(
+      express.json({
+        limit: MAX_APPROVAL_BODY_BYTES,
+        verify: (req: express.Request & { rawBody?: Buffer }, _res, buf) => {
+          req.rawBody = buf;
+        },
+      }),
+    );
+    app.use(
+      express.urlencoded({
+        extended: true,
+        limit: MAX_APPROVAL_BODY_BYTES,
+        verify: (req: express.Request & { rawBody?: Buffer }, _res, buf) => {
+          req.rawBody = buf;
+        },
+      }),
+    );
     await app.init();
 
     db = app.get<HitlDb>(DB_TOKEN);
@@ -481,6 +497,62 @@ describe('HITL Approval Layer — Phase 1 E2E', () => {
       .send(payload)
       .expect(201);
     expect(replay.body.deduplicated).toBe(true);
+  });
+
+  it('Phase 4: verifies Slack Block Kit interaction signatures and applies modal edits', async () => {
+    const signingSecret = 'slack_test_signing_secret';
+    await db
+      .update(projects)
+      .set({ slackSigningSecretEnc: cryptoSvc.encryptSecret(signingSecret) })
+      .where(eq(projects.id, projectId));
+
+    const created = await request(app.getHttpServer())
+      .post('/v1/approvals')
+      .set('Authorization', `Bearer ${rawApiKey}`)
+      .send({
+        action_type: 'stripe.refund',
+        title: 'Slack edit test',
+        callback_url: 'https://example.com/hook',
+        payload: { order_id: 'ord_slack', refund_amount_usd: 200 },
+        editable_schema: editableSchema,
+      })
+      .expect(202);
+
+    const slackPayload = JSON.stringify({
+      type: 'view_submission',
+      user: { id: 'U123', username: 'alex' },
+      view: {
+        callback_id: 'hitl_edit_submit',
+        private_metadata: created.body.id,
+        state: {
+          values: {
+            field_refund_amount_usd: {
+              refund_amount_usd: { value: '125' },
+            },
+          },
+        },
+      },
+    });
+    const rawBody = `payload=${encodeURIComponent(slackPayload)}`;
+    const ts = Math.floor(Date.now() / 1000);
+    const sig = `v0=${crypto.createHmac('sha256', signingSecret).update(`v0:${ts}:${rawBody}`).digest('hex')}`;
+
+    const res = await request(app.getHttpServer())
+      .post('/v1/slack/interactions')
+      .set('Content-Type', 'application/x-www-form-urlencoded')
+      .set('x-slack-request-timestamp', String(ts))
+      .set('x-slack-signature', sig)
+      .send(rawBody)
+      .expect(201);
+
+    expect(res.body).toEqual({ response_action: 'clear' });
+
+    const [updated] = await db
+      .select()
+      .from(approvalRequests)
+      .where(eq(approvalRequests.id, created.body.id));
+    expect(updated.status).toBe('edited_and_approved');
+    expect(updated.finalPayload).toEqual({ order_id: 'ord_slack', refund_amount_usd: 125 });
   });
 });
 

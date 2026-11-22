@@ -29,6 +29,7 @@ import {
 import { DB_TOKEN } from '../db/db.module.js';
 import { CryptoService } from '../common/crypto.service.js';
 import { getPlanLimits } from '../common/plan-limits.js';
+import { SlackService } from '../slack/slack.service.js';
 import { QUEUE_EMAILS, QUEUE_TIMEOUTS } from '../workers/queues.module.js';
 
 @Injectable()
@@ -36,6 +37,7 @@ export class ApprovalsService {
   constructor(
     @Inject(DB_TOKEN) private readonly db: HitlDb,
     private readonly crypto: CryptoService,
+    private readonly slackService: SlackService,
     @InjectQueue(QUEUE_TIMEOUTS) private readonly timeoutQueue: Queue,
     @InjectQueue(QUEUE_EMAILS) private readonly emailQueue: Queue,
   ) {}
@@ -335,6 +337,31 @@ export class ApprovalsService {
           { attempts: 3, backoff: { type: 'exponential', delay: 5000 }, removeOnComplete: true },
         );
       }
+    }
+
+    const [projSlack] = await this.db
+      .select({
+        slackBotTokenEnc: projects.slackBotTokenEnc,
+        defaultSlackChannel: projects.defaultSlackChannel,
+      })
+      .from(projects)
+      .where(eq(projects.id, projectId))
+      .limit(1);
+
+    if (projSlack?.slackBotTokenEnc && projSlack.defaultSlackChannel) {
+      const botToken = this.crypto.decryptSecret(projSlack.slackBotTokenEnc);
+      void this.slackService
+        .postApprovalCard({
+          botToken,
+          channel: projSlack.defaultSlackChannel,
+          requestId: created.id,
+          title: created.title,
+          actionType: created.actionType,
+          summary: created.summary,
+          payload: created.originalPayload,
+          hasEditableSchema: Boolean(created.editableSchema),
+        })
+        .catch(() => undefined);
     }
 
     return {

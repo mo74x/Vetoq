@@ -52,11 +52,19 @@ export class ProjectsController {
         orgId: projects.orgId,
         name: projects.name,
         defaultApproverEmails: projects.defaultApproverEmails,
+        defaultSlackChannel: projects.defaultSlackChannel,
+        slackBotTokenEnc: projects.slackBotTokenEnc,
         createdAt: projects.createdAt,
       })
       .from(projects)
       .where(and(eq(projects.orgId, orgId), isNull(projects.deletedAt)))
-      .orderBy(desc(projects.createdAt));
+      .orderBy(desc(projects.createdAt))
+      .then((rows) =>
+        rows.map(({ slackBotTokenEnc, ...rest }) => ({
+          ...rest,
+          hasSlackConfigured: Boolean(slackBotTokenEnc),
+        })),
+      );
   }
 
   @Post()
@@ -151,7 +159,14 @@ export class ProjectsController {
   async updateProject(
     @Req() req: { authSession: AuthenticatedSession },
     @Param('projectId') projectId: string,
-    @Body() body: { name?: string; default_approver_emails?: string[] },
+    @Body()
+    body: {
+      name?: string;
+      default_approver_emails?: string[];
+      default_slack_channel?: string;
+      slack_bot_token?: string;
+      slack_signing_secret?: string;
+    },
   ) {
     const orgId = this.requireOrg(req.authSession);
     const [project] = await this.db
@@ -166,12 +181,22 @@ export class ProjectsController {
       .set({
         ...(body.name?.trim() ? { name: body.name.trim() } : {}),
         ...(body.default_approver_emails ? { defaultApproverEmails: body.default_approver_emails } : {}),
+        ...(body.default_slack_channel !== undefined
+          ? { defaultSlackChannel: body.default_slack_channel.trim() || null }
+          : {}),
+        ...(body.slack_bot_token?.trim()
+          ? { slackBotTokenEnc: this.crypto.encryptSecret(body.slack_bot_token.trim()) }
+          : {}),
+        ...(body.slack_signing_secret?.trim()
+          ? { slackSigningSecretEnc: this.crypto.encryptSecret(body.slack_signing_secret.trim()) }
+          : {}),
       })
       .where(eq(projects.id, projectId))
       .returning({
         id: projects.id,
         name: projects.name,
         defaultApproverEmails: projects.defaultApproverEmails,
+        defaultSlackChannel: projects.defaultSlackChannel,
       });
     return updated;
   }

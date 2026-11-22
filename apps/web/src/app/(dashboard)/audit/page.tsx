@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { apiFetch } from '@/lib/api-client';
+import { ProjectSelector } from '@/components/dashboard/project-selector';
 
 interface AuditRow {
   id: string;
@@ -19,8 +20,9 @@ export default function AuditPage() {
   const [logs, setLogs] = useState<AuditRow[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  async function load(e: React.FormEvent) {
-    e.preventDefault();
+  async function load(e?: React.FormEvent) {
+    e?.preventDefault();
+    if (!projectId) return;
     setError(null);
     try {
       const data = await apiFetch<AuditRow[]>(
@@ -31,6 +33,10 @@ export default function AuditPage() {
       setError(err instanceof Error ? err.message : 'Failed to load audit logs');
     }
   }
+
+  useEffect(() => {
+    if (projectId) void load();
+  }, [projectId]);
 
   const filtered = query.trim()
     ? logs.filter(
@@ -45,14 +51,7 @@ export default function AuditPage() {
     <div className="space-y-6">
       <h1 className="text-2xl font-semibold text-slate-900">Audit Logs</h1>
       <form onSubmit={load} className="flex flex-wrap gap-3">
-        <input
-          type="text"
-          required
-          value={projectId}
-          onChange={(e) => setProjectId(e.target.value)}
-          placeholder="Project UUID"
-          className="w-80 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
-        />
+        <ProjectSelector value={projectId} onChange={setProjectId} />
         <input
           type="text"
           value={query}

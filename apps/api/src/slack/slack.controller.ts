@@ -22,13 +22,24 @@ import {
   webhookDeliveries,
   type HitlDb,
 } from '@hitl/db';
+import { applyAndValidateEdits, type EditableSchemaMap } from '@hitl/shared';
 import { DB_TOKEN } from '../db/db.module.js';
 import { CryptoService } from '../common/crypto.service.js';
 import { QUEUE_TIMEOUTS, QUEUE_WEBHOOKS } from '../workers/queues.module.js';
+import { SlackService } from './slack.service.js';
 
 interface SlackInteractionPayload {
+  type?: 'block_actions' | 'view_submission';
+  trigger_id?: string;
   user?: { id?: string; username?: string; name?: string };
   actions?: Array<{ action_id?: string; value?: string }>;
+  view?: {
+    callback_id?: string;
+    private_metadata?: string;
+    state?: {
+      values?: Record<string, Record<string, { value?: string }>>;
+    };
+  };
 }
 
 @Controller('v1/slack')
@@ -36,6 +47,7 @@ export class SlackController {
   constructor(
     @Inject(DB_TOKEN) private readonly db: HitlDb,
     private readonly crypto: CryptoService,
+    private readonly slackService: SlackService,
     @InjectQueue(QUEUE_TIMEOUTS) private readonly timeoutQueue: Queue,
     @InjectQueue(QUEUE_WEBHOOKS) private readonly webhookQueue: Queue,
   ) {}
@@ -72,17 +84,16 @@ export class SlackController {
     }
 
     const interaction = JSON.parse(rawPayload) as SlackInteractionPayload;
+    const isModalSubmit =
+      interaction.type === 'view_submission' &&
+      interaction.view?.callback_id === 'hitl_edit_submit';
     const action = interaction.actions?.[0];
-    const requestId = action?.value;
-    const decision =
-      action?.action_id === 'hitl_approve'
-        ? 'approve'
-        : action?.action_id === 'hitl_reject'
-          ? 'reject'
-          : null;
+    const requestId = isModalSubmit
+      ? interaction.view?.private_metadata
+      : action?.value;
 
-    if (!requestId || !decision) {
-      throw new BadRequestException('Unsupported Slack action');
+    if (!requestId) {
+      throw new BadRequestException('Missing requestId in Slack interaction');
     }
 
     const [row] = await this.db
@@ -106,8 +117,56 @@ export class SlackController {
     const rawBody = req.rawBody ?? Buffer.from(JSON.stringify(req.body));
     this.verifySlackSignature(rawBody, timestampHeader, signatureHeader, signingSecret);
 
-    const slackUser = interaction.user?.username ?? interaction.user?.name ?? interaction.user?.id ?? 'slack-user';
+    // Handle "Edit & Approve" modal trigger
+    if (!isModalSubmit && action?.action_id === 'hitl_open_edit') {
+      if (!row.project.slackBotTokenEnc || !interaction.trigger_id || !row.request.editableSchema) {
+        throw new BadRequestException('Slack bot token or editable_schema unavailable');
+      }
+      await this.slackService.openEditModal({
+        botToken: this.crypto.decryptSecret(row.project.slackBotTokenEnc),
+        triggerId: interaction.trigger_id,
+        requestId,
+        title: row.request.title,
+        currentPayload: row.request.finalPayload ?? row.request.originalPayload,
+        editableSchema: row.request.editableSchema as EditableSchemaMap,
+      });
+      return { ok: true };
+    }
+
+    const decision: 'approve' | 'reject' | null = isModalSubmit
+      ? 'approve'
+      : action?.action_id === 'hitl_approve'
+        ? 'approve'
+        : action?.action_id === 'hitl_reject'
+          ? 'reject'
+          : null;
+
+    if (!decision) {
+      throw new BadRequestException('Unsupported Slack action');
+    }
+
+    const slackUser =
+      interaction.user?.username ?? interaction.user?.name ?? interaction.user?.id ?? 'slack-user';
     const actorEmail = `${slackUser}@slack.local`;
+
+    // Parse edited values from Slack modal state if modal submission
+    const editedFields: Record<string, unknown> = {};
+    if (isModalSubmit && interaction.view?.state?.values && row.request.editableSchema) {
+      const schema = row.request.editableSchema as EditableSchemaMap;
+      for (const blockValues of Object.values(interaction.view.state.values)) {
+        for (const [key, inputObj] of Object.entries(blockValues)) {
+          const def = schema[key];
+          if (!def || inputObj.value === undefined) continue;
+          if (def.type === 'number') {
+            editedFields[key] = Number(inputObj.value);
+          } else if (def.type === 'boolean') {
+            editedFields[key] = inputObj.value === 'true';
+          } else {
+            editedFields[key] = inputObj.value;
+          }
+        }
+      }
+    }
 
     const deliveryId = await this.db.transaction(async (tx) => {
       const locked = await tx.execute(
@@ -118,18 +177,47 @@ export class SlackController {
         return null;
       }
 
-      const terminalStatus = decision === 'approve' ? 'approved' : 'rejected';
+      const currentPayload =
+        (lockedRow.final_payload as Record<string, unknown> | null) ??
+        (lockedRow.original_payload as Record<string, unknown>);
+      let nextPayload = currentPayload;
+      let diffPayload: unknown = null;
+      let wasEdited = false;
+
+      if (Object.keys(editedFields).length > 0) {
+        const editRes = applyAndValidateEdits(
+          currentPayload,
+          editedFields,
+          lockedRow.editable_schema as EditableSchemaMap | null,
+        );
+        if (!editRes.valid) {
+          throw new BadRequestException({ message: 'Invalid Slack modal edits', errors: editRes.errors });
+        }
+        nextPayload = editRes.finalPayload;
+        diffPayload = editRes.diff;
+        wasEdited = editRes.changed;
+      }
+
+      const terminalStatus =
+        decision === 'reject'
+          ? 'rejected'
+          : wasEdited
+            ? 'edited_and_approved'
+            : 'approved';
+
       await tx.insert(approvalVotes).values({
         approvalRequestId: requestId,
         approverEmail: actorEmail,
         approverName: slackUser,
         payloadVersion: Number(lockedRow.payload_version),
         decision,
+        editedPayload: wasEdited ? nextPayload : null,
       });
 
       await tx
         .update(approvalRequests)
         .set({
+          finalPayload: nextPayload,
           status: terminalStatus,
           deliveryStatus: 'pending',
           decidedAt: new Date(),
@@ -147,6 +235,7 @@ export class SlackController {
         eventType: terminalStatus,
         actorType: 'human',
         actorIdentifier: actorEmail,
+        diffPayload,
         metadata: { source: 'slack' },
       });
 
@@ -171,6 +260,8 @@ export class SlackController {
       );
     }
 
-    return { text: `Recorded Slack ${decision} for request ${requestId}.` };
+    return isModalSubmit
+      ? { response_action: 'clear' }
+      : { text: `Recorded Slack ${decision} for request ${requestId}.` };
   }
 }

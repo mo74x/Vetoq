@@ -8,6 +8,8 @@ interface Project {
   id: string;
   name: string;
   defaultApproverEmails: string[];
+  defaultSlackChannel?: string | null;
+  hasSlackConfigured?: boolean;
   createdAt: string;
 }
 
@@ -35,6 +37,9 @@ export default function ProjectsPage() {
   const [orgName, setOrgName] = useState('');
   const [logoUrl, setLogoUrl] = useState('');
   const [accentColor, setAccentColor] = useState('#0f172a');
+  const [slackChannel, setSlackChannel] = useState('');
+  const [slackBotToken, setSlackBotToken] = useState('');
+  const [slackSigningSecret, setSlackSigningSecret] = useState('');
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -75,7 +80,10 @@ export default function ProjectsPage() {
     if (selectedProjectId) {
       void loadKeys(selectedProjectId);
       const proj = projects.find((p) => p.id === selectedProjectId);
-      if (proj) setDefaultApprovers(proj.defaultApproverEmails.join(', '));
+      if (proj) {
+        setDefaultApprovers(proj.defaultApproverEmails.join(', '));
+        setSlackChannel(proj.defaultSlackChannel ?? '');
+      }
     }
   }, [selectedProjectId]);
 
@@ -195,6 +203,28 @@ export default function ProjectsPage() {
       setStatusMsg('Organization branding updated.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save branding');
+    }
+  }
+
+  async function saveSlackConfig(e: React.FormEvent) {
+    e.preventDefault();
+    if (!selectedProjectId) return;
+    setError(null);
+    try {
+      await apiFetch(`/dashboard/projects/${selectedProjectId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          default_slack_channel: slackChannel,
+          ...(slackBotToken.trim() ? { slack_bot_token: slackBotToken } : {}),
+          ...(slackSigningSecret.trim() ? { slack_signing_secret: slackSigningSecret } : {}),
+        }),
+      });
+      setSlackBotToken('');
+      setSlackSigningSecret('');
+      setStatusMsg('Slack integration updated.');
+      await loadProjects();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save Slack settings');
     }
   }
 
@@ -391,6 +421,39 @@ export default function ProjectsPage() {
                 className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white"
               >
                 Save Branding
+              </button>
+            </form>
+
+            <form onSubmit={saveSlackConfig} className="space-y-3 border-t border-slate-200 pt-4">
+              <h3 className="text-sm font-semibold text-slate-900">Slack Block Kit Integration</h3>
+              <div className="space-y-2">
+                <input
+                  type="text"
+                  value={slackChannel}
+                  onChange={(e) => setSlackChannel(e.target.value)}
+                  placeholder="Default Slack Channel ID (e.g. C01234567)"
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                />
+                <input
+                  type="password"
+                  value={slackBotToken}
+                  onChange={(e) => setSlackBotToken(e.target.value)}
+                  placeholder="Slack Bot Token (xoxb-..., leave blank to keep)"
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                />
+                <input
+                  type="password"
+                  value={slackSigningSecret}
+                  onChange={(e) => setSlackSigningSecret(e.target.value)}
+                  placeholder="Slack Signing Secret (leave blank to keep)"
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                />
+              </div>
+              <button
+                type="submit"
+                className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white"
+              >
+                Save Slack Settings
               </button>
             </form>
           </div>

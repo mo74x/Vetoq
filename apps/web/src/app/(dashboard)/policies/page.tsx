@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { apiFetch } from '@/lib/api-client';
+import { ProjectSelector } from '@/components/dashboard/project-selector';
 
 interface ConditionRow {
   field: string;
@@ -46,6 +47,10 @@ export default function PoliciesPage() {
       setError(err instanceof Error ? err.message : 'Failed to load policies');
     }
   }
+
+  useEffect(() => {
+    if (projectId) void loadPolicies();
+  }, [projectId]);
 
   function parseConditionValue(raw: string, op: string): unknown {
     if (op === 'in') {
@@ -108,19 +113,13 @@ export default function PoliciesPage() {
     <div className="space-y-6">
       <h1 className="text-2xl font-semibold text-slate-900">Policy Rules</h1>
       <div className="flex gap-3">
-        <input
-          type="text"
-          value={projectId}
-          onChange={(e) => setProjectId(e.target.value)}
-          placeholder="Project UUID"
-          className="w-80 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
-        />
+        <ProjectSelector value={projectId} onChange={setProjectId} />
         <button
           type="button"
           onClick={loadPolicies}
           className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white"
         >
-          Load Policies
+          Refresh
         </button>
       </div>
 
