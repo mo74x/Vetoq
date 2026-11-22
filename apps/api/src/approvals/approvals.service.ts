@@ -167,6 +167,7 @@ export class ApprovalsService {
       required_approvals: p.requiredApprovals,
       timeout_seconds: p.timeoutSeconds,
       timeout_behavior: 'reject',
+      require_otp: p.requireOtp,
       approver_emails: p.approverEmails,
       is_active: p.isActive,
     }));

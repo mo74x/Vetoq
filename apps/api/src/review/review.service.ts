@@ -1,6 +1,8 @@
+import crypto from 'node:crypto';
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   GoneException,
   Inject,
   Injectable,
@@ -76,6 +78,17 @@ export class ReviewService {
     return row;
   }
 
+  async resolveCustomDomain(host: string) {
+    const cleanHost = host.split(':')[0].toLowerCase();
+    const [org] = await this.db
+      .select({ slug: organizations.slug })
+      .from(organizations)
+      .where(eq(organizations.customDomain, cleanHost))
+      .limit(1);
+    if (!org) throw new NotFoundException('Custom domain not configured');
+    return org;
+  }
+
   /**
    * 100% read-only GET endpoint: performs zero DB writes.
    */
@@ -84,6 +97,9 @@ export class ReviewService {
       await this.lookupValidToken(rawToken);
 
     const actionNonce = this.crypto.mintActionNonce(token.id, request.payloadVersion, 900);
+    const requireOtp = Boolean(
+      (request.effectivePolicySnapshot as { require_otp?: boolean } | null)?.require_otp,
+    );
 
     return {
       request_id: request.id,
@@ -96,6 +112,7 @@ export class ReviewService {
       edit_count: request.editCount,
       max_edit_rounds: MAX_EDIT_ROUNDS,
       required_approvals: request.requiredApprovals,
+      require_otp: requireOtp,
       original_payload: request.originalPayload,
       current_payload: request.finalPayload ?? request.originalPayload,
       editable_schema: request.editableSchema,
@@ -108,6 +125,32 @@ export class ReviewService {
         branding: brandingConfig,
       },
     };
+  }
+
+  async sendOtp(rawToken: string) {
+    const { token, request, orgName } = await this.lookupValidToken(rawToken);
+    const otpCode = String(crypto.randomInt(100000, 999999));
+    const otpCodeHash = this.crypto.sha256Hex(otpCode);
+    const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+    await this.db
+      .update(approvalTokens)
+      .set({ otpCodeHash, otpExpiresAt, otpAttempts: 0 })
+      .where(eq(approvalTokens.id, token.id));
+
+    await this.emailQueue.add(
+      'send-otp-email',
+      {
+        kind: 'otp',
+        to: token.approverEmail,
+        orgName,
+        otpCode,
+        title: request.title,
+      },
+      { attempts: 3, backoff: { type: 'exponential', delay: 3000 }, removeOnComplete: true },
+    );
+
+    return { sent: true, expires_at: otpExpiresAt.toISOString() };
   }
 
   async recordViewed(rawToken: string, metadata: { ip?: string; userAgent?: string }) {
@@ -129,9 +172,28 @@ export class ReviewService {
       throw new UnauthorizedException('Invalid or expired action_nonce');
     }
 
-    const { token, orgName, orgSlug } = await this.lookupValidToken(rawToken);
+    const { token, request, orgName, orgSlug } = await this.lookupValidToken(rawToken);
     if (claims.token_id !== token.id) {
       throw new UnauthorizedException('action_nonce does not match review token');
+    }
+
+    const requireOtp = Boolean(
+      (request.effectivePolicySnapshot as { require_otp?: boolean } | null)?.require_otp,
+    );
+    if (requireOtp) {
+      if (token.otpAttempts >= 5) {
+        throw new ForbiddenException('Maximum OTP attempts exceeded; request a new code');
+      }
+      if (!body.otp_code || !token.otpCodeHash || !token.otpExpiresAt || token.otpExpiresAt < new Date()) {
+        throw new UnauthorizedException('Missing or expired 6-digit OTP code');
+      }
+      if (this.crypto.sha256Hex(body.otp_code) !== token.otpCodeHash) {
+        await this.db
+          .update(approvalTokens)
+          .set({ otpAttempts: token.otpAttempts + 1 })
+          .where(eq(approvalTokens.id, token.id));
+        throw new UnauthorizedException('Invalid 6-digit OTP code');
+      }
     }
 
     // Enforce single-use action_nonce via Redis SET NX
@@ -206,6 +268,7 @@ export class ReviewService {
             required_approvals: p.requiredApprovals,
             timeout_seconds: p.timeoutSeconds,
             timeout_behavior: 'reject',
+            require_otp: p.requireOtp,
             approver_emails: p.approverEmails,
             is_active: p.isActive,
           }));

@@ -124,6 +124,7 @@ export class ProjectsController {
         name: organizations.name,
         slug: organizations.slug,
         plan: organizations.plan,
+        customDomain: organizations.customDomain,
         brandingConfig: organizations.brandingConfig,
       })
       .from(organizations)
@@ -136,12 +137,15 @@ export class ProjectsController {
   @Patch('branding')
   async updateBranding(
     @Req() req: { authSession: AuthenticatedSession },
-    @Body() body: { logo_url?: string; accent_color?: string },
+    @Body() body: { logo_url?: string; accent_color?: string; custom_domain?: string },
   ) {
     const orgId = this.requireOrg(req.authSession);
     const [updated] = await this.db
       .update(organizations)
       .set({
+        ...(body.custom_domain !== undefined
+          ? { customDomain: body.custom_domain.trim().toLowerCase() || null }
+          : {}),
         brandingConfig: {
           logo_url: body.logo_url?.trim() || undefined,
           accent_color: body.accent_color?.trim() || undefined,
@@ -150,6 +154,7 @@ export class ProjectsController {
       .where(eq(organizations.id, orgId))
       .returning({
         id: organizations.id,
+        customDomain: organizations.customDomain,
         brandingConfig: organizations.brandingConfig,
       });
     return updated;

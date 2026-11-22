@@ -73,6 +73,7 @@ export const organizations = pgTable('organizations', {
   billingCustomerId: text('billing_customer_id'),
   billingSubscriptionId: text('billing_subscription_id'),
   billingStatus: text('billing_status').notNull().default('active'),
+  customDomain: text('custom_domain').unique(),
   brandingConfig: jsonb('branding_config').$type<Record<string, unknown>>().notNull().default({}),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
@@ -150,6 +151,7 @@ export const policies = pgTable(
     requiredApprovals: integer('required_approvals').notNull().default(1),
     timeoutSeconds: integer('timeout_seconds').notNull().default(3600),
     timeoutBehavior: text('timeout_behavior').notNull().default('reject'),
+    requireOtp: boolean('require_otp').notNull().default(false),
     approverEmails: text('approver_emails')
       .array()
       .notNull()
@@ -212,6 +214,9 @@ export const approvalTokens = pgTable('approval_tokens', {
     .references(() => approvalRequests.id, { onDelete: 'cascade' }),
   approverEmail: text('approver_email').notNull(),
   tokenHash: text('token_hash').notNull().unique(),
+  otpCodeHash: text('otp_code_hash'),
+  otpExpiresAt: timestamp('otp_expires_at', { withTimezone: true }),
+  otpAttempts: integer('otp_attempts').notNull().default(0),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   revokedAt: timestamp('revoked_at', { withTimezone: true }),
   usedAt: timestamp('used_at', { withTimezone: true }),

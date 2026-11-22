@@ -63,6 +63,7 @@ export class PoliciesController {
       decision_mode: 'auto_approve' | 'require_approval' | 'auto_reject';
       required_approvals?: number;
       timeout_seconds?: number;
+      require_otp?: boolean;
       approver_emails?: string[];
     },
   ) {
@@ -83,6 +84,7 @@ export class PoliciesController {
         requiredApprovals: body.required_approvals ?? 1,
         timeoutSeconds: body.timeout_seconds ?? 3600,
         timeoutBehavior: 'reject',
+        requireOtp: body.require_otp ?? false,
         approverEmails: body.approver_emails ?? [],
       })
       .returning();

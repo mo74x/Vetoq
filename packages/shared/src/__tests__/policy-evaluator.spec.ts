@@ -11,6 +11,7 @@ const basePolicy: PolicyRule = {
   required_approvals: 1,
   timeout_seconds: 3600,
   timeout_behavior: 'reject',
+  require_otp: false,
   approver_emails: ['lead@agency.com'],
   is_active: true,
 };

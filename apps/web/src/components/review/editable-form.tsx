@@ -7,6 +7,7 @@ interface EditableFormProps {
   token: string;
   actionNonce: string;
   payloadVersion: number;
+  requireOtp?: boolean;
   originalPayload: Record<string, unknown>;
   currentPayload: Record<string, unknown>;
   editableSchema: EditableSchemaMap | null;
@@ -17,6 +18,7 @@ export function EditableForm({
   token,
   actionNonce,
   payloadVersion,
+  requireOtp = false,
   originalPayload,
   currentPayload,
   editableSchema,
@@ -25,6 +27,8 @@ export function EditableForm({
   const [formValues, setFormValues] = useState<Record<string, unknown>>({ ...currentPayload });
   const [approverName, setApproverName] = useState('');
   const [note, setNote] = useState('');
+  const [otpCode, setOtpCode] = useState('');
+  const [otpSent, setOtpSent] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [resultStatus, setResultStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -55,6 +59,7 @@ export function EditableForm({
           payload_version: payloadVersion,
           decision,
           approver_name: approverName.trim() || undefined,
+          otp_code: requireOtp && otpCode.trim() ? otpCode.trim() : undefined,
           edited_fields:
             editedFields && Object.keys(editedFields).length > 0 ? editedFields : undefined,
           note: note.trim() || undefined,
@@ -187,6 +192,39 @@ export function EditableForm({
       </div>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
+
+      {requireOtp && (
+        <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs font-medium text-slate-700">
+              6-Digit Email Verification Required
+            </p>
+            <button
+              type="button"
+              onClick={async () => {
+                setError(null);
+                const r = await fetch(`/api/v1/review/${encodeURIComponent(token)}/otp`, {
+                  method: 'POST',
+                });
+                if (r.ok) setOtpSent(true);
+                else setError('Failed to send OTP code');
+              }}
+              className="rounded border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700"
+            >
+              {otpSent ? 'Resend Code' : 'Send Code'}
+            </button>
+          </div>
+          <input
+            type="text"
+            inputMode="numeric"
+            maxLength={6}
+            value={otpCode}
+            onChange={(e) => setOtpCode(e.target.value)}
+            placeholder="Enter 6-digit OTP"
+            className="mt-2 w-48 rounded-md border border-slate-300 bg-white px-3 py-1.5 font-mono text-sm"
+          />
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-3">
         <button

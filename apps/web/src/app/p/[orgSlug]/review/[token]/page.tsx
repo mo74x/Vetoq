@@ -16,6 +16,7 @@ interface ReviewContext {
   edit_count: number;
   max_edit_rounds: number;
   required_approvals: number;
+  require_otp?: boolean;
   original_payload: Record<string, unknown>;
   current_payload: Record<string, unknown>;
   editable_schema: EditableSchemaMap | null;
@@ -99,6 +100,7 @@ export default function ReviewPortalPage() {
             token={params.token}
             actionNonce={context.action_nonce}
             payloadVersion={context.payload_version}
+            requireOtp={context.require_otp}
             originalPayload={context.original_payload}
             currentPayload={context.current_payload}
             editableSchema={context.editable_schema}

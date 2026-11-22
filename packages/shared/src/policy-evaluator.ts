@@ -7,6 +7,7 @@ export interface PolicyEvaluationResult {
   required_approvals: number;
   timeout_seconds: number;
   timeout_behavior: 'reject';
+  require_otp: boolean;
   approver_emails: string[];
   matched_policy_id: string | null;
   matched_policy_snapshot: PolicyRule | null;
@@ -92,6 +93,7 @@ function failClosedResult(
     required_approvals: 1,
     timeout_seconds: defaultTimeoutSeconds,
     timeout_behavior: 'reject',
+    require_otp: false,
     approver_emails: [],
     matched_policy_id: null,
     matched_policy_snapshot: null,
@@ -137,6 +139,7 @@ export function evaluatePolicies(
         required_approvals: policy.required_approvals,
         timeout_seconds: policy.timeout_seconds,
         timeout_behavior: 'reject',
+        require_otp: policy.require_otp ?? false,
         approver_emails: policy.approver_emails,
         matched_policy_id: policy.id,
         matched_policy_snapshot: policy,

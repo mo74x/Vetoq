@@ -34,6 +34,7 @@ export const policyRuleSchema = z.object({
   required_approvals: z.number().int().min(1).default(1),
   timeout_seconds: z.number().int().min(60).max(604800).default(3600),
   timeout_behavior: z.literal('reject').default('reject'),
+  require_otp: z.boolean().default(false),
   approver_emails: z.array(z.string().email()).default([]),
   is_active: z.boolean().default(true),
 });
@@ -97,6 +98,7 @@ export const submitDecisionRequestSchema = z
     payload_version: z.number().int().min(1),
     decision: z.enum(['approve', 'reject']),
     approver_name: z.string().min(1).max(120).optional(),
+    otp_code: z.string().regex(/^\d{6}$/).optional(),
     edited_fields: z.record(z.string(), z.unknown()).optional(),
     note: z.string().max(2000).optional(),
   })

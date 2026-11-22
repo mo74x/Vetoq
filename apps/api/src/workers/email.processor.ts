@@ -5,14 +5,16 @@ import { Resend } from 'resend';
 import { QUEUE_EMAILS } from './queues.module.js';
 
 interface ReviewEmailJob {
+  kind?: 'review' | 'otp';
   to: string;
-  orgSlug: string;
+  orgSlug?: string;
   orgName: string;
-  token: string;
+  token?: string;
+  otpCode?: string;
   title: string;
-  actionType: string;
-  summary: string | null;
-  isRenotification: boolean;
+  actionType?: string;
+  summary?: string | null;
+  isRenotification?: boolean;
 }
 
 @Processor(QUEUE_EMAILS)
@@ -27,7 +29,24 @@ export class EmailProcessor extends WorkerHost {
   }
 
   async process(job: Job<ReviewEmailJob>): Promise<void> {
-    const { to, orgSlug, orgName, token, title, actionType, summary, isRenotification } = job.data;
+    const { kind = 'review', to, orgSlug, orgName, token, otpCode, title, actionType, summary, isRenotification } =
+      job.data;
+
+    if (kind === 'otp') {
+      const subject = `[${orgName}] Verification code for ${title}`;
+      if (!this.resend) {
+        this.logger.log(`[DEV OTP EMAIL] To=${to} Code=${otpCode}`);
+        return;
+      }
+      await this.resend.emails.send({
+        from: process.env.EMAIL_FROM ?? 'approvals@example.com',
+        to,
+        subject,
+        html: `<p>Your 6-digit verification code for <strong>${title}</strong> is <strong>${otpCode}</strong>. It expires in 10 minutes.</p>`,
+      });
+      return;
+    }
+
     const webUrl = (process.env.WEB_URL ?? 'http://localhost:3000').replace(/\/$/, '');
     const reviewUrl = `${webUrl}/p/${orgSlug}/review/${token}`;
     const subject = isRenotification
