@@ -461,7 +461,7 @@ export class ReviewService {
     });
 
     if (result.terminal && result.deliveryId) {
-      await this.timeoutQueue.remove(`timeout:${token.approvalRequestId}`);
+      await this.timeoutQueue.remove(`timeout_${token.approvalRequestId}`);
       await this.webhookQueue.add(
         'deliver-webhook',
         { deliveryId: result.deliveryId, approvalRequestId: token.approvalRequestId },

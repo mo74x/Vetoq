@@ -9,7 +9,7 @@
     "start": "node dist/main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src test",
-    "test:e2e": "jest --config ./test/jest-e2e.json"
+    "test:e2e": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config ./test/jest-e2e.json --runInBand --forceExit"
   },
   "dependencies": {
     "@hitl/db": "workspace:*",
@@ -21,6 +21,7 @@
     "@nestjs/platform-express": "^11.0.10",
     "better-auth": "^1.2.4",
     "bullmq": "^5.34.3",
+    "express": "^5.0.0",
     "ioredis": "^5.4.2",
     "pg": "^8.13.1",
     "reflect-metadata": "^0.2.2",

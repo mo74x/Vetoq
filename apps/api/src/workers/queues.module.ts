@@ -1,4 +1,4 @@
-import { Global, Module } from '@nestjs/common';
+import { Global, Inject, Module, type OnModuleDestroy } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { Redis } from 'ioredis';
 
@@ -9,15 +9,24 @@ export const QUEUE_WEBHOOKS = 'hitl-webhooks';
 export const QUEUE_EMAILS = 'hitl-emails';
 export const QUEUE_RECONCILIATION = 'hitl-reconciliation';
 
+function getRedisConnectionOptions() {
+  const rawUrl = process.env.REDIS_URL ?? 'redis://127.0.0.1:6379';
+  const parsed = new URL(rawUrl);
+  const host = parsed.hostname === 'localhost' ? '127.0.0.1' : parsed.hostname;
+  return {
+    host,
+    port: parsed.port ? Number(parsed.port) : 6379,
+    password: parsed.password || undefined,
+    maxRetriesPerRequest: null as null,
+  };
+}
+
 @Global()
 @Module({
   imports: [
     BullModule.forRootAsync({
       useFactory: () => ({
-        connection: {
-          url: process.env.REDIS_URL ?? 'redis://localhost:6379',
-          maxRetriesPerRequest: null,
-        },
+        connection: getRedisConnectionOptions(),
       }),
     }),
     BullModule.registerQueue(
@@ -30,9 +39,15 @@ export const QUEUE_RECONCILIATION = 'hitl-reconciliation';
   providers: [
     {
       provide: REDIS_TOKEN,
-      useFactory: () => new Redis(process.env.REDIS_URL ?? 'redis://localhost:6379'),
+      useFactory: () => new Redis(getRedisConnectionOptions()),
     },
   ],
   exports: [BullModule, REDIS_TOKEN],
 })
-export class QueuesModule {}
+export class QueuesModule implements OnModuleDestroy {
+  constructor(@Inject(REDIS_TOKEN) private readonly redis: Redis) {}
+
+  onModuleDestroy() {
+    this.redis.disconnect();
+  }
+}

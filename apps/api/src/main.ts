@@ -1,4 +1,6 @@
 import 'reflect-metadata';
+import fs from 'node:fs';
+import path from 'node:path';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { NestFactory } from '@nestjs/core';
 import { toNodeHandler } from 'better-auth/node';
@@ -8,6 +10,10 @@ import { BETTER_AUTH_TOKEN } from './auth/auth.guard.js';
 import type { BetterAuthInstance } from './auth/auth.js';
 
 async function bootstrap() {
+  const rootEnv = path.resolve(process.cwd(), '../../.env');
+  if (!process.env.DATABASE_URL && fs.existsSync(rootEnv)) {
+    process.loadEnvFile(rootEnv);
+  }
   const app = await NestFactory.create(AppModule, { bodyParser: false });
 
   const expressApp = app.getHttpAdapter().getInstance();

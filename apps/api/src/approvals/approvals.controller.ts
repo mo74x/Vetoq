@@ -8,7 +8,6 @@ import {
   Req,
   Res,
   UseGuards,
-  UsePipes,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { createApprovalRequestSchema, type CreateApprovalRequest } from '@hitl/shared';
@@ -22,10 +21,9 @@ export class ApprovalsController {
   constructor(private readonly approvalsService: ApprovalsService) {}
 
   @Post()
-  @UsePipes(new ZodValidationPipe(createApprovalRequestSchema))
   async create(
     @Req() req: { projectAuth: AuthenticatedProject },
-    @Body() body: CreateApprovalRequest,
+    @Body(new ZodValidationPipe(createApprovalRequestSchema)) body: CreateApprovalRequest,
     @Headers('idempotency-key') idempotencyKey: string | undefined,
     @Res() res: Response,
   ) {

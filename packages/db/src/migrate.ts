@@ -1,9 +1,14 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { createDb, createDbPool } from './index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const rootEnvPath = path.resolve(__dirname, '../../../.env');
+if (!process.env.DATABASE_URL && fs.existsSync(rootEnvPath)) {
+  process.loadEnvFile(rootEnvPath);
+}
 const migrationsFolder = path.resolve(__dirname, '../drizzle');
 
 async function main() {

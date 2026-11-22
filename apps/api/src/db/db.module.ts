@@ -1,4 +1,4 @@
-import { Global, Module } from '@nestjs/common';
+import { Global, Inject, Module, type OnModuleDestroy } from '@nestjs/common';
 import { createDb, createDbPool, type HitlDb } from '@hitl/db';
 
 export const DB_TOKEN = Symbol('HITL_DB');
@@ -23,4 +23,12 @@ export const DB_POOL_TOKEN = Symbol('HITL_DB_POOL');
   ],
   exports: [DB_TOKEN, DB_POOL_TOKEN],
 })
-export class DbModule {}
+export class DbModule implements OnModuleDestroy {
+  constructor(
+    @Inject(DB_POOL_TOKEN) private readonly pool: ReturnType<typeof createDbPool>,
+  ) {}
+
+  async onModuleDestroy() {
+    await this.pool.end();
+  }
+}

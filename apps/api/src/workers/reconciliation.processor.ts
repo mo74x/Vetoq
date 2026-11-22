@@ -41,7 +41,7 @@ export class ReconciliationProcessor extends WorkerHost implements OnModuleInit 
       await this.timeoutQueue.add(
         'expire-approval',
         { approvalRequestId: row.id },
-        { jobId: `timeout:${row.id}`, removeOnComplete: true },
+        { jobId: `timeout_${row.id}`, removeOnComplete: true },
       );
     }
 
@@ -59,7 +59,7 @@ export class ReconciliationProcessor extends WorkerHost implements OnModuleInit 
         'deliver-webhook',
         { deliveryId: row.id, approvalRequestId: row.approvalRequestId },
         {
-          jobId: `webhook:${row.id}`,
+          jobId: `webhook_${row.id}`,
           attempts: 5,
           backoff: { type: 'exponential', delay: 10000 },
           removeOnComplete: true,

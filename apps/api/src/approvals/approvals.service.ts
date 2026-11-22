@@ -283,7 +283,7 @@ export class ApprovalsService {
       'expire-approval',
       { approvalRequestId: created.id },
       {
-        jobId: `timeout:${created.id}`,
+        jobId: `timeout_${created.id}`,
         delay: Math.max(1000, effectiveTimeout * 1000),
         removeOnComplete: true,
         removeOnFail: false,

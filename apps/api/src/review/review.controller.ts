@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Req, UsePipes } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import { submitDecisionRequestSchema, type SubmitDecisionRequest } from '@hitl/shared';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
@@ -22,8 +22,10 @@ export class ReviewController {
   }
 
   @Post(':token/decide')
-  @UsePipes(new ZodValidationPipe(submitDecisionRequestSchema))
-  async decide(@Param('token') token: string, @Body() body: SubmitDecisionRequest) {
+  async decide(
+    @Param('token') token: string,
+    @Body(new ZodValidationPipe(submitDecisionRequestSchema)) body: SubmitDecisionRequest,
+  ) {
     return this.reviewService.submitDecision(token, body);
   }
 }
