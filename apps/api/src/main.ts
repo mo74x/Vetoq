@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import express, { type NextFunction, type Request, type Response } from 'express';
@@ -17,6 +18,27 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bodyParser: false });
 
   const expressApp = app.getHttpAdapter().getInstance();
+
+  // Structured JSON request logging with X-Request-Id correlation
+  expressApp.use((req: Request, res: Response, next: NextFunction) => {
+    const requestId = (req.headers['x-request-id'] as string | undefined) || crypto.randomUUID();
+    res.setHeader('X-Request-Id', requestId);
+    const start = Date.now();
+    res.on('finish', () => {
+      console.log(
+        JSON.stringify({
+          level: 'info',
+          request_id: requestId,
+          method: req.method,
+          path: req.path,
+          status: res.statusCode,
+          duration_ms: Date.now() - start,
+        }),
+      );
+    });
+    next();
+  });
+
   const auth = app.get<BetterAuthInstance>(BETTER_AUTH_TOKEN);
   const authHandler = toNodeHandler(auth);
 

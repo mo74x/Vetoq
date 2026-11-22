@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Inject,
   NotFoundException,
@@ -12,11 +13,20 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { and, desc, eq, isNull } from 'drizzle-orm';
-import { apiKeys, organizations, projects, type HitlDb } from '@hitl/db';
+import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
+import {
+  apiKeys,
+  approvalRequests,
+  approvalTokens,
+  approvalVotes,
+  organizations,
+  projects,
+  type HitlDb,
+} from '@hitl/db';
 import { AuthGuard, type AuthenticatedSession } from '../auth/auth.guard.js';
 import { DB_TOKEN } from '../db/db.module.js';
 import { CryptoService } from '../common/crypto.service.js';
+import { getPlanLimits } from '../common/plan-limits.js';
 
 @Controller('v1/dashboard/projects')
 @UseGuards(AuthGuard)
@@ -58,6 +68,25 @@ export class ProjectsController {
     if (!body.name?.trim()) {
       throw new BadRequestException('Project name is required');
     }
+
+    const [org] = await this.db
+      .select({ plan: organizations.plan })
+      .from(organizations)
+      .where(eq(organizations.id, orgId))
+      .limit(1);
+    const limits = getPlanLimits(org?.plan);
+    if (limits.maxProjects !== null) {
+      const existingProjects = await this.db
+        .select({ id: projects.id })
+        .from(projects)
+        .where(and(eq(projects.orgId, orgId), isNull(projects.deletedAt)));
+      if (existingProjects.length >= limits.maxProjects) {
+        throw new ForbiddenException(
+          `Project limit (${limits.maxProjects}) reached for plan "${org?.plan ?? 'free'}"`,
+        );
+      }
+    }
+
     const rawSecret = `whsec_${this.crypto.randomToken(24)}`;
     const [created] = await this.db
       .insert(projects)
@@ -257,5 +286,51 @@ export class ProjectsController {
       .where(and(eq(apiKeys.id, keyId), eq(apiKeys.projectId, projectId)));
 
     return { revoked: true };
+  }
+
+  @Delete(':projectId')
+  async offboardProject(
+    @Req() req: { authSession: AuthenticatedSession },
+    @Param('projectId') projectId: string,
+  ) {
+    const orgId = this.requireOrg(req.authSession);
+    const [project] = await this.db
+      .select({ id: projects.id })
+      .from(projects)
+      .where(and(eq(projects.id, projectId), eq(projects.orgId, orgId), isNull(projects.deletedAt)))
+      .limit(1);
+    if (!project) throw new NotFoundException('Project not found');
+
+    await this.db.transaction(async (tx) => {
+      await tx
+        .update(projects)
+        .set({ deletedAt: new Date(), defaultApproverEmails: [] })
+        .where(eq(projects.id, projectId));
+
+      await tx
+        .update(apiKeys)
+        .set({ revokedAt: new Date() })
+        .where(and(eq(apiKeys.projectId, projectId), isNull(apiKeys.revokedAt)));
+
+      const reqRows = await tx
+        .select({ id: approvalRequests.id })
+        .from(approvalRequests)
+        .where(eq(approvalRequests.projectId, projectId));
+
+      const reqIds = reqRows.map((r) => r.id);
+      if (reqIds.length > 0) {
+        await tx
+          .update(approvalTokens)
+          .set({ approverEmail: 'redacted@offboarded.local', revokedAt: new Date() })
+          .where(inArray(approvalTokens.approvalRequestId, reqIds));
+
+        await tx
+          .update(approvalVotes)
+          .set({ approverEmail: 'redacted@offboarded.local', approverName: 'Redacted' })
+          .where(inArray(approvalVotes.approvalRequestId, reqIds));
+      }
+    });
+
+    return { offboarded: true };
   }
 }

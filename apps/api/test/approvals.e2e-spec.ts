@@ -441,6 +441,47 @@ describe('HITL Approval Layer — Phase 1 E2E', () => {
       db.execute(sql`DELETE FROM audit_logs WHERE id = ${logRow.id}`),
     ).rejects.toThrow(/append-only/i);
   });
+
+  it('Phase 3: serves GET /healthz and processes HMAC-verified MoR billing webhooks idempotently', async () => {
+    const health = await request(app.getHttpServer()).get('/healthz').expect(200);
+    expect(health.body).toEqual({ status: 'ok', postgres: 'up', redis: 'up' });
+
+    const payload = JSON.stringify({
+      id: `evt_${crypto.randomUUID()}`,
+      type: 'subscription.created',
+      data: {
+        organization_id: orgId,
+        customer_id: 'cus_123',
+        subscription_id: 'sub_123',
+        plan: 'agency',
+        status: 'active',
+      },
+    });
+    const secret = process.env.BILLING_WEBHOOK_SECRET ?? 'whsec_billing_placeholder';
+    const sig = crypto.createHmac('sha256', secret).update(payload).digest('hex');
+
+    await request(app.getHttpServer())
+      .post('/v1/billing/webhooks/mor')
+      .set('Content-Type', 'application/json')
+      .set('x-billing-signature', `sha256=${sig}`)
+      .send(payload)
+      .expect(201);
+
+    const [orgRow] = await db
+      .select({ plan: organizations.plan, billingStatus: organizations.billingStatus })
+      .from(organizations)
+      .where(eq(organizations.id, orgId));
+    expect(orgRow.plan).toBe('agency');
+    expect(orgRow.billingStatus).toBe('active');
+
+    const replay = await request(app.getHttpServer())
+      .post('/v1/billing/webhooks/mor')
+      .set('Content-Type', 'application/json')
+      .set('x-billing-signature', `sha256=${sig}`)
+      .send(payload)
+      .expect(201);
+    expect(replay.body.deduplicated).toBe(true);
+  });
 });
 
 // Keep http import referenced for future local webhook mock server tests

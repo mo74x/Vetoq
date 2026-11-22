@@ -1,10 +1,12 @@
-import { Body, Controller, Get, Param, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 import { submitDecisionRequestSchema, type SubmitDecisionRequest } from '@hitl/shared';
+import { RateLimitGuard } from '../common/rate-limit.guard.js';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
 import { ReviewService } from './review.service.js';
 
 @Controller('v1/review')
+@UseGuards(RateLimitGuard)
 export class ReviewController {
   constructor(private readonly reviewService: ReviewService) {}
 

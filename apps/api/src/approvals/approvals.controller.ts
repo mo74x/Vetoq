@@ -12,11 +12,12 @@ import {
 import type { Response } from 'express';
 import { createApprovalRequestSchema, type CreateApprovalRequest } from '@hitl/shared';
 import { ApiKeyGuard, type AuthenticatedProject } from '../common/api-key.guard.js';
+import { RateLimitGuard } from '../common/rate-limit.guard.js';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
 import { ApprovalsService } from './approvals.service.js';
 
 @Controller('v1/approvals')
-@UseGuards(ApiKeyGuard)
+@UseGuards(RateLimitGuard, ApiKeyGuard)
 export class ApprovalsController {
   constructor(private readonly approvalsService: ApprovalsService) {}
 

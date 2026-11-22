@@ -70,6 +70,9 @@ export const organizations = pgTable('organizations', {
   logo: text('logo'),
   metadata: text('metadata'),
   plan: text('plan').notNull().default('free'),
+  billingCustomerId: text('billing_customer_id'),
+  billingSubscriptionId: text('billing_subscription_id'),
+  billingStatus: text('billing_status').notNull().default('active'),
   brandingConfig: jsonb('branding_config').$type<Record<string, unknown>>().notNull().default({}),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
@@ -276,3 +279,11 @@ export const webhookDeliveries = pgTable(
       .where(sql`${table.status} = 'pending'`),
   ],
 );
+
+export const billingEvents = pgTable('billing_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  provider: text('provider').notNull(),
+  externalEventId: text('external_event_id').notNull().unique(),
+  eventType: text('event_type').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});

@@ -1,13 +1,14 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import type { Queue } from 'bullmq';
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, sql } from 'drizzle-orm';
 import {
   approvalRequests,
   approvalTokens,
@@ -27,6 +28,7 @@ import {
 } from '@hitl/shared';
 import { DB_TOKEN } from '../db/db.module.js';
 import { CryptoService } from '../common/crypto.service.js';
+import { getPlanLimits } from '../common/plan-limits.js';
 import { QUEUE_EMAILS, QUEUE_TIMEOUTS } from '../workers/queues.module.js';
 
 @Injectable()
@@ -110,6 +112,38 @@ export class ApprovalsService {
             expires_at: existing.expiresAt.toISOString(),
           },
         };
+      }
+    }
+
+    const [org] = await this.db
+      .select({ slug: organizations.slug, name: organizations.name, plan: organizations.plan })
+      .from(organizations)
+      .where(eq(organizations.id, orgId))
+      .limit(1);
+
+    if (org) {
+      const limits = getPlanLimits(org.plan);
+      if (limits.monthlyApprovals !== null) {
+        const monthStart = new Date();
+        monthStart.setUTCDate(1);
+        monthStart.setUTCHours(0, 0, 0, 0);
+
+        const [countRow] = await this.db
+          .select({ count: sql<number>`count(*)::int` })
+          .from(approvalRequests)
+          .innerJoin(projects, eq(approvalRequests.projectId, projects.id))
+          .where(
+            and(
+              eq(projects.orgId, orgId),
+              gte(approvalRequests.createdAt, monthStart),
+            ),
+          );
+
+        if ((countRow?.count ?? 0) >= limits.monthlyApprovals) {
+          throw new ForbiddenException(
+            `Monthly approval quota (${limits.monthlyApprovals}) reached for plan "${org.plan}"`,
+          );
+        }
       }
     }
 
@@ -208,12 +242,6 @@ export class ApprovalsService {
       evaluation.approver_emails.length > 0
         ? evaluation.approver_emails
         : await this.resolveFallbackApprovers(projectId, orgId);
-
-    const [org] = await this.db
-      .select({ slug: organizations.slug, name: organizations.name })
-      .from(organizations)
-      .where(eq(organizations.id, orgId))
-      .limit(1);
 
     const tokensToEmail: Array<{ email: string; rawToken: string }> = [];
 
